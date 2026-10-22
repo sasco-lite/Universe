@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { AppPage, CameraPreset, StarOrbitData } from '../types';
-import { soundEngine } from '../audio/BlackHoleAudio';
+import { AppPage, CameraPreset, StarOrbitData, GravityWellState, LaunchedStar } from '../types';
+import { soundEngine, triggerHaptic } from '../audio/BlackHoleAudio';
 
 interface BlackHoleState {
   currentPage: AppPage;
@@ -13,17 +13,17 @@ interface BlackHoleState {
   targetCameraLookAt: [number, number, number];
   setCameraTarget: (pos: [number, number, number], lookAt: [number, number, number]) => void;
 
-  // Real relativistic parameters
-  massSolar: number; // e.g. 4.154e6
+  // Relativistic parameters
+  massSolar: number;
   setMassSolar: (mass: number) => void;
 
-  spinParameter: number; // Dimensionless a in [-0.998, 0.998]
+  spinParameter: number;
   setSpinParameter: (spin: number) => void;
 
   diskBrightness: number;
   setDiskBrightness: (brightness: number) => void;
 
-  diskTemperature: number; // Kelvin
+  diskTemperature: number;
   setDiskTemperature: (temp: number) => void;
 
   dopplerBeaming: boolean;
@@ -49,10 +49,25 @@ interface BlackHoleState {
 
   selectedStar: StarOrbitData | null;
   setSelectedStar: (star: StarOrbitData | null) => void;
+  hoveredStar: StarOrbitData | null;
+  setHoveredStar: (star: StarOrbitData | null) => void;
+
   followSelectedStar: boolean;
   setFollowSelectedStar: (follow: boolean) => void;
 
-  // Time dilation live demo
+  // Interactive transient gravity well
+  gravityWell: GravityWellState;
+  setGravityWell: (gw: GravityWellState) => void;
+
+  // Star Launcher
+  showLauncherTool: boolean;
+  setShowLauncherTool: (show: boolean) => void;
+  launchedStars: LaunchedStar[];
+  launchStar: (pos: [number, number, number], vel: [number, number, number]) => void;
+  updateLaunchedStars: (dt: number, rs: number) => void;
+  clearLaunchedStars: () => void;
+
+  // Time dilation experiment
   probeDistanceRs: number;
   setProbeDistanceRs: (dist: number) => void;
   probeCoordinateTime: number;
@@ -65,22 +80,31 @@ interface BlackHoleState {
   currentCameraDistanceRs: number;
   setCurrentCameraDistanceRs: (dist: number) => void;
 
-  // UI state
+  // UI state & Minimalism
   hudCollapsed: boolean;
   toggleHudCollapsed: () => void;
+  minimalUI: boolean;
+  toggleMinimalUI: () => void;
+
+  shortcutHintVisible: boolean;
+  dismissShortcutHint: () => void;
+
+  activeLearnMore: boolean;
+  setActiveLearnMore: (open: boolean) => void;
 
   audioEnabled: boolean;
   toggleAudio: () => void;
 
   qualityMode: 'high' | 'medium' | 'low';
   setQualityMode: (mode: 'high' | 'medium' | 'low') => void;
+
+  resetSimulation: () => void;
 }
 
 export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
   currentPage: 'home',
   setCurrentPage: (page) => {
-    // Determine smart camera choreography based on target page
-    let targetPos: [number, number, number] = [0, 8, 28];
+    let targetPos: [number, number, number] = [0, 6, 26];
     let targetLook: [number, number, number] = [0, 0, 0];
 
     switch (page) {
@@ -89,11 +113,11 @@ export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
         targetLook = [0, 0, 0];
         break;
       case 'anatomy':
-        targetPos = [4, 3, 14];
+        targetPos = [4, 2.5, 13];
         targetLook = [0, 0, 0];
         break;
       case 'cluster':
-        targetPos = [0, 24, 48];
+        targetPos = [0, 22, 45];
         targetLook = [0, 0, 0];
         break;
       case 'lab':
@@ -159,11 +183,10 @@ export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
   targetCameraLookAt: [0, 0, 0],
   setCameraTarget: (pos, lookAt) => set({ targetCameraPos: pos, targetCameraLookAt: lookAt }),
 
-  // Relativistic parameters
-  massSolar: 4.154e6, // 4.154 million solar masses
+  massSolar: 4.154e6,
   setMassSolar: (mass) => set({ massSolar: mass }),
 
-  spinParameter: 0.85, // Sgr A* dimensionless spin
+  spinParameter: 0.85,
   setSpinParameter: (spin) => set({ spinParameter: spin }),
 
   diskBrightness: 1.0,
@@ -199,8 +222,78 @@ export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
     set({ selectedStar: star });
   },
 
+  hoveredStar: null,
+  setHoveredStar: (star) => {
+    if (star && get().hoveredStar?.id !== star.id) {
+      soundEngine.playStarHover();
+    }
+    set({ hoveredStar: star });
+  },
+
   followSelectedStar: false,
   setFollowSelectedStar: (follow) => set({ followSelectedStar: follow }),
+
+  // Transient interactive gravity well
+  gravityWell: { x: 0, y: 0, z: 0, strength: 0, active: false },
+  setGravityWell: (gw) => set({ gravityWell: gw }),
+
+  // Star launcher
+  showLauncherTool: false,
+  setShowLauncherTool: (show) => set({ showLauncherTool: show }),
+  launchedStars: [],
+  launchStar: (pos, vel) => {
+    soundEngine.playStarLaunch();
+    const newStar: LaunchedStar = {
+      id: Date.now(),
+      pos,
+      vel,
+      color: '#38BDF8',
+      size: 4.5,
+      trail: [pos],
+      status: 'orbiting',
+    };
+    set((s) => ({ launchedStars: [...s.launchedStars.slice(-25), newStar] }));
+  },
+  updateLaunchedStars: (dt, rs) => {
+    set((s) => {
+      const updated = s.launchedStars.map((st) => {
+        if (st.status !== 'orbiting') return st;
+
+        let [px, py, pz] = st.pos;
+        let [vx, vy, vz] = st.vel;
+
+        // Gravity pull toward central black hole: a = -GM * pos / r^3
+        const rSq = px * px + py * py + pz * pz;
+        const r = Math.sqrt(rSq);
+
+        if (r < rs) {
+          return { ...st, status: 'plunged' as const };
+        }
+        if (r > 80) {
+          return { ...st, status: 'escaped' as const };
+        }
+
+        const accelMag = (3.5 * rs) / (rSq * r + 0.05);
+        vx -= (px / r) * accelMag * dt;
+        vy -= (py / r) * accelMag * dt;
+        vz -= (pz / r) * accelMag * dt;
+
+        px += vx * dt;
+        py += vy * dt;
+        pz += vz * dt;
+
+        const newTrail = [...st.trail.slice(-45), [px, py, pz] as [number, number, number]];
+        return {
+          ...st,
+          pos: [px, py, pz] as [number, number, number],
+          vel: [vx, vy, vz] as [number, number, number],
+          trail: newTrail,
+        };
+      });
+      return { launchedStars: updated };
+    });
+  },
+  clearLaunchedStars: () => set({ launchedStars: [] }),
 
   // Time dilation experiment
   probeDistanceRs: 2.2,
@@ -210,7 +303,6 @@ export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
   infinityTime: 0,
   advanceDilationTime: (dt) => {
     const { probeDistanceRs, infinityTime, probeProperTime, probeCoordinateTime } = get();
-    // d\tau = dt_inf * sqrt(1 - 1 / r)
     const dilationRate = Math.sqrt(Math.max(0, 1 - 1.0 / probeDistanceRs));
     set({
       infinityTime: infinityTime + dt,
@@ -231,13 +323,40 @@ export const useBlackHoleStore = create<BlackHoleState>((set, get) => ({
   hudCollapsed: false,
   toggleHudCollapsed: () => set((s) => ({ hudCollapsed: !s.hudCollapsed })),
 
+  minimalUI: false,
+  toggleMinimalUI: () => set((s) => ({ minimalUI: !s.minimalUI })),
+
+  shortcutHintVisible: true,
+  dismissShortcutHint: () => set({ shortcutHintVisible: false }),
+
+  activeLearnMore: false,
+  setActiveLearnMore: (open) => set({ activeLearnMore: open }),
+
   audioEnabled: false,
   toggleAudio: () => {
     const next = !get().audioEnabled;
     soundEngine.toggle(next);
+    triggerHaptic(20);
     set({ audioEnabled: next });
   },
 
   qualityMode: 'high',
   setQualityMode: (mode) => set({ qualityMode: mode }),
+
+  resetSimulation: () => {
+    soundEngine.playChirp(480);
+    set({
+      massSolar: 4.154e6,
+      spinParameter: 0.85,
+      diskBrightness: 1.0,
+      diskTemperature: 8500,
+      simulationSpeed: 1.0,
+      isPaused: false,
+      followSelectedStar: false,
+      targetCameraPos: [0, 6, 26],
+      targetCameraLookAt: [0, 0, 0],
+      launchedStars: [],
+      probeDistanceRs: 2.2,
+    });
+  },
 }));

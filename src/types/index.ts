@@ -25,23 +25,26 @@ export interface AnatomyZone {
   name: string;
   radiusFormula: string;
   radiusRs: number;
+  shortLabel: string;
   description: string;
-  physicsDetails: string;
-  keyPhenomenon: string;
   cameraPosition: [number, number, number];
   cameraTarget: [number, number, number];
 }
 
-export interface SimulationParams {
-  massSolar: number; // e.g. 4.15 million M_sun
-  spinParameter: number; // Dimensionless a in [-0.998, 0.998]
-  diskBrightness: number;
-  diskTemperature: number;
-  dopplerBeaming: boolean;
-  gravitationalLensing: boolean;
-  showSpacetimeGrid: boolean;
-  gridDepth: number;
-  simulationSpeed: number;
-  isPaused: boolean;
-  starCount: number;
+export interface GravityWellState {
+  x: number;
+  y: number;
+  z: number;
+  strength: number;
+  active: boolean;
+}
+
+export interface LaunchedStar {
+  id: number;
+  pos: [number, number, number];
+  vel: [number, number, number];
+  color: string;
+  size: number;
+  trail: [number, number, number][];
+  status: 'orbiting' | 'plunged' | 'escaped';
 }
