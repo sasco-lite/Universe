@@ -1,0 +1,6 @@
+{
+  "name": "Sagittarius A* - Relativistic Supermassive Black Hole",
+  "description": "An immersive, mathematically grounded 3D WebGL journey around Sagittarius A*, with relativistic ray-marching shaders, 15,000 GPU-simulated orbiting stars, Kerr spacetime lensing, and time dilation laboratory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
